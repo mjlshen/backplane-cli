@@ -5,6 +5,7 @@ import (
 	"errors"
 	"fmt"
 	"net/http"
+	"net/url"
 	"os"
 	"strings"
 
@@ -12,10 +13,10 @@ import (
 	logger "github.com/sirupsen/logrus"
 	"github.com/spf13/cobra"
 	"k8s.io/cli-runtime/pkg/genericclioptions"
+	"k8s.io/client-go/rest"
 	"k8s.io/client-go/tools/clientcmd/api"
 
 	BackplaneApi "github.com/openshift/backplane-api/pkg/client"
-
 	"github.com/openshift/backplane-cli/pkg/cli/config"
 	"github.com/openshift/backplane-cli/pkg/cli/globalflags"
 	"github.com/openshift/backplane-cli/pkg/login"
@@ -257,6 +258,36 @@ func runLogin(cmd *cobra.Command, argv []string) (err error) {
 	err = login.SaveKubeConfig(clusterId, rc, args.multiCluster, args.kubeConfigPath)
 
 	return err
+}
+
+func GetRestConfig(bp config.BackplaneConfiguration, clusterId string) (*rest.Config, error) {
+	cluster, err := utils.DefaultOCMInterface.GetClusterInfoByID(clusterId)
+	if err != nil {
+		return nil, err
+	}
+
+	accessToken, err := utils.DefaultOCMInterface.GetOCMAccessToken()
+	if err != nil {
+		return nil, err
+	}
+
+	bpAPIClusterUrl, err := doLogin(bp.URL, clusterId, *accessToken)
+	if err != nil {
+		return nil, fmt.Errorf("failed to backplane login to cluster %s: %v", cluster.Name(), err)
+	}
+
+	return &rest.Config{
+		Host:        bpAPIClusterUrl,
+		BearerToken: *accessToken,
+		// TODO: Support impersonation
+		Impersonate: rest.ImpersonationConfig{},
+		Proxy: func(*http.Request) (*url.URL, error) {
+			if bp.ProxyURL == "" {
+				return nil, nil
+			}
+			return url.Parse(bp.ProxyURL)
+		},
+	}, nil
 }
 
 // getContextNickname returns a nickname of a context
